@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { PlusCircle, RefreshCw, Download, Upload } from "lucide-react";
@@ -6,88 +6,48 @@ import InventoryTable from "./InventoryTable";
 import LowStockAlert from "./LowStockAlert";
 import ProductForm from "./ProductForm";
 import { Dialog, DialogContent } from "../ui/dialog";
-
-interface Product {
-  id: string;
-  name: string;
-  sku: string;
-  category: string;
-  price: number;
-  cost: number;
-  stock: number;
-  reorderLevel: number;
-}
+import { productsApi, categoriesApi, Product, Category } from "../../lib/api";
 
 const InventoryModule = () => {
   const [activeTab, setActiveTab] = useState("all-products");
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Sample products data
-  const products = [
-    {
-      id: "1",
-      name: "Kopi Arabica",
-      sku: "KP-001",
-      category: "Minuman",
-      price: 15000,
-      cost: 8000,
-      stock: 25,
-      reorderLevel: 10,
-    },
-    {
-      id: "2",
-      name: "Nasi Goreng",
-      sku: "NG-001",
-      category: "Makanan",
-      price: 25000,
-      cost: 12000,
-      stock: 5,
-      reorderLevel: 8,
-    },
-    {
-      id: "3",
-      name: "Es Teh Manis",
-      sku: "ET-001",
-      category: "Minuman",
-      price: 8000,
-      cost: 3000,
-      stock: 40,
-      reorderLevel: 15,
-    },
-    {
-      id: "4",
-      name: "Roti Bakar",
-      sku: "RB-001",
-      category: "Makanan",
-      price: 12000,
-      cost: 5000,
-      stock: 12,
-      reorderLevel: 10,
-    },
-    {
-      id: "5",
-      name: "Ayam Goreng",
-      sku: "AG-001",
-      category: "Makanan",
-      price: 18000,
-      cost: 10000,
-      stock: 8,
-      reorderLevel: 5,
-    },
-  ];
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      // Load products
+      const productsData = await productsApi.getAll();
+      setProducts(productsData);
+
+      // Load categories
+      const categoriesData = await categoriesApi.getAll();
+      setCategories(categoriesData);
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Filter low stock products
   const lowStockProducts = products
-    .filter((product) => product.stock <= product.reorderLevel)
+    .filter((product) => product.stock <= product.reorder_level)
     .map((product) => ({
       id: product.id,
       name: product.name,
       currentStock: product.stock,
-      reorderLevel: product.reorderLevel,
+      reorderLevel: product.reorder_level,
       category: product.category,
-      suggestedOrder: Math.max(product.reorderLevel * 2 - product.stock, 5),
-      lastSold: "2 jam lalu", // Mock data
+      suggestedOrder: Math.max(product.reorder_level * 2 - product.stock, 5),
+      lastSold: "Hari ini", // This would come from transaction data in a real implementation
     }));
 
   const handleAddProduct = () => {
@@ -100,20 +60,64 @@ const InventoryModule = () => {
     setShowProductForm(true);
   };
 
-  const handleDeleteProduct = (productId: string) => {
-    // In a real app, this would call an API to delete the product
-    console.log(`Delete product with ID: ${productId}`);
+  const handleDeleteProduct = async (productId: string) => {
+    if (window.confirm("Apakah Anda yakin ingin menghapus produk ini?")) {
+      try {
+        await productsApi.delete(productId);
+        loadData(); // Reload data after deletion
+      } catch (error) {
+        console.error("Error deleting product:", error);
+        alert("Gagal menghapus produk. Silakan coba lagi.");
+      }
+    }
   };
 
-  const handleProductSubmit = (productData: any) => {
-    // In a real app, this would call an API to save the product
-    console.log("Product data submitted:", productData);
-    setShowProductForm(false);
+  const handleProductSubmit = async (productData: any) => {
+    try {
+      if (editingProduct) {
+        // Update existing product
+        await productsApi.update(editingProduct.id, {
+          name: productData.name,
+          price: productData.price,
+          cost: productData.cost,
+          category: productData.category,
+          sku: productData.sku,
+          stock: productData.stock,
+          reorder_level: productData.reorderPoint,
+          description: productData.description,
+          is_active: productData.isActive,
+        });
+      } else {
+        // Create new product
+        await productsApi.create({
+          name: productData.name,
+          price: productData.price,
+          cost: productData.cost,
+          category: productData.category,
+          sku: productData.sku,
+          stock: productData.stock,
+          reorder_level: productData.reorderPoint,
+          description: productData.description,
+          is_active: productData.isActive,
+        });
+      }
+
+      setShowProductForm(false);
+      loadData(); // Reload data after submission
+    } catch (error) {
+      console.error("Error saving product:", error);
+      alert("Gagal menyimpan produk. Silakan coba lagi.");
+    }
   };
 
   const handleReorder = (productId: string) => {
-    // In a real app, this would open a reorder form or process
-    console.log(`Reorder product with ID: ${productId}`);
+    // Find the product
+    const product = products.find((p) => p.id === productId);
+    if (product) {
+      // Set it as editing product and open the form
+      setEditingProduct(product);
+      setShowProductForm(true);
+    }
   };
 
   return (
@@ -124,7 +128,7 @@ const InventoryModule = () => {
           <p className="text-gray-500">Kelola produk dan pantau stok barang</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" className="gap-2" onClick={loadData}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
@@ -143,94 +147,110 @@ const InventoryModule = () => {
         </div>
       </div>
 
-      {/* Low Stock Alert Banner */}
-      {lowStockProducts.length > 0 && (
-        <div className="mb-6">
-          <LowStockAlert
-            products={lowStockProducts}
-            onReorder={handleReorder}
-            onViewAll={() => setActiveTab("low-stock")}
-          />
+      {isLoading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Low Stock Alert Banner */}
+          {lowStockProducts.length > 0 && (
+            <div className="mb-6">
+              <LowStockAlert
+                products={lowStockProducts}
+                onReorder={handleReorder}
+                onViewAll={() => setActiveTab("low-stock")}
+              />
+            </div>
+          )}
 
-      {/* Inventory Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="all-products">Semua Produk</TabsTrigger>
-          <TabsTrigger value="low-stock">
-            Stok Menipis
-            {lowStockProducts.length > 0 && (
-              <span className="ml-2 bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded-full">
-                {lowStockProducts.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="categories">Kategori</TabsTrigger>
-        </TabsList>
+          {/* Inventory Tabs */}
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="w-full"
+          >
+            <TabsList className="mb-4">
+              <TabsTrigger value="all-products">Semua Produk</TabsTrigger>
+              <TabsTrigger value="low-stock">
+                Stok Menipis
+                {lowStockProducts.length > 0 && (
+                  <span className="ml-2 bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded-full">
+                    {lowStockProducts.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="categories">Kategori</TabsTrigger>
+            </TabsList>
 
-        <TabsContent value="all-products" className="mt-0">
-          <InventoryTable
-            products={products}
-            onEdit={handleEditProduct}
-            onDelete={handleDeleteProduct}
-            onAdd={handleAddProduct}
-          />
-        </TabsContent>
+            <TabsContent value="all-products" className="mt-0">
+              <InventoryTable
+                products={products}
+                onEdit={handleEditProduct}
+                onDelete={handleDeleteProduct}
+                onAdd={handleAddProduct}
+              />
+            </TabsContent>
 
-        <TabsContent value="low-stock" className="mt-0">
-          <InventoryTable
-            products={products.filter(
-              (product) => product.stock <= product.reorderLevel,
-            )}
-            onEdit={handleEditProduct}
-            onDelete={handleDeleteProduct}
-            onAdd={handleAddProduct}
-          />
-        </TabsContent>
+            <TabsContent value="low-stock" className="mt-0">
+              <InventoryTable
+                products={products.filter(
+                  (product) => product.stock <= product.reorder_level,
+                )}
+                onEdit={handleEditProduct}
+                onDelete={handleDeleteProduct}
+                onAdd={handleAddProduct}
+              />
+            </TabsContent>
 
-        <TabsContent value="categories" className="mt-0">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from(
-              new Set(products.map((product) => product.category)),
-            ).map((category) => (
-              <div
-                key={category}
-                className="bg-white p-4 rounded-lg border shadow-sm"
-              >
-                <h3 className="font-medium text-lg mb-2">{category}</h3>
-                <p className="text-sm text-gray-500 mb-4">
-                  {products.filter((p) => p.category === category).length}{" "}
-                  produk
-                </p>
-                <Button variant="outline" size="sm" className="w-full">
-                  Lihat Produk
-                </Button>
+            <TabsContent value="categories" className="mt-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categories.map((category) => {
+                  const productsInCategory = products.filter(
+                    (p) => p.category === category.name,
+                  ).length;
+                  return (
+                    <div
+                      key={category.id}
+                      className="bg-white p-4 rounded-lg border shadow-sm"
+                    >
+                      <h3 className="font-medium text-lg mb-2">
+                        {category.name}
+                      </h3>
+                      <p className="text-sm text-gray-500 mb-4">
+                        {productsInCategory} produk
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          setActiveTab("all-products");
+                          // This would filter the products table by category
+                        }}
+                      >
+                        Lihat Produk
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        </TabsContent>
-      </Tabs>
+            </TabsContent>
+          </Tabs>
 
-      {/* Product Form Dialog */}
-      <Dialog open={showProductForm} onOpenChange={setShowProductForm}>
-        <DialogContent className="max-w-3xl p-0">
-          <ProductForm
-            product={
-              editingProduct
-                ? {
-                    ...editingProduct,
-                    description: "", // Add missing fields from ProductForm interface
-                    reorderPoint: editingProduct.reorderLevel,
-                    isActive: true,
-                  }
-                : undefined
-            }
-            onSubmit={handleProductSubmit}
-            onCancel={() => setShowProductForm(false)}
-          />
-        </DialogContent>
-      </Dialog>
+          {/* Product Form Dialog */}
+          <Dialog open={showProductForm} onOpenChange={setShowProductForm}>
+            <DialogContent className="max-w-2xl">
+              <ProductForm
+                product={editingProduct}
+                categories={categories.map((c) => c.name)}
+                onSubmit={handleProductSubmit}
+                onCancel={() => setShowProductForm(false)}
+              />
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </div>
   );
 };

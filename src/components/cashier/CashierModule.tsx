@@ -1,17 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import ProductGrid from "./ProductGrid";
 import ShoppingCart from "./ShoppingCart";
 import CheckoutModal from "./CheckoutModal";
 import ReceiptModal from "./ReceiptModal";
-
-interface Product {
-  id: string;
-  name: string;
-  price: number;
-  image?: string;
-  category: string;
-  inStock: boolean;
-}
+import { useSupabase } from "../../contexts/SupabaseContext";
+import { productsApi, transactionsApi, storeSettingsApi } from "../../lib/api";
+import { Product, StoreSettings } from "../../lib/api";
 
 interface CartItem {
   id: string;
@@ -19,26 +13,18 @@ interface CartItem {
   price: number;
   quantity: number;
   image?: string;
+  product_id: string;
 }
 
 const CashierModule = () => {
-  const [cartItems, setCartItems] = useState<CartItem[]>([
-    {
-      id: "1",
-      name: "Nasi Goreng",
-      price: 25000,
-      quantity: 2,
-    },
-    {
-      id: "2",
-      name: "Es Teh Manis",
-      price: 5000,
-      quantity: 3,
-    },
-  ]);
-
+  const { user } = useSupabase();
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(
+    null,
+  );
+  const [isLoading, setIsLoading] = useState(true);
   const [transactionData, setTransactionData] = useState({
     receiptNumber: `INV-${new Date().toISOString().slice(0, 10)}-${Math.floor(Math.random() * 1000)}`,
     date: new Date().toLocaleDateString("id-ID"),
@@ -51,19 +37,44 @@ const CashierModule = () => {
     tax: 0,
     total: 0,
     paymentMethod: "Tunai",
-    cashierName: "Budi Santoso",
+    cashierName: user?.name || "Kasir",
     storeName: "Warung Makan Bahagia",
     storeAddress: "Jl. Pahlawan No. 123, Jakarta",
     storePhone: "021-5551234",
   });
 
+  useEffect(() => {
+    const loadStoreSettings = async () => {
+      try {
+        const settings = await storeSettingsApi.get();
+        if (settings) {
+          setStoreSettings(settings);
+          setTransactionData((prev) => ({
+            ...prev,
+            storeName: settings.store_name,
+            storeAddress: settings.address || prev.storeAddress,
+            storePhone: settings.phone || prev.storePhone,
+          }));
+        }
+      } catch (error) {
+        console.error("Error loading store settings:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadStoreSettings();
+  }, []);
+
   const handleAddToCart = (product: Product) => {
-    const existingItem = cartItems.find((item) => item.id === product.id);
+    const existingItem = cartItems.find(
+      (item) => item.product_id === product.id,
+    );
 
     if (existingItem) {
       setCartItems(
         cartItems.map((item) =>
-          item.id === product.id
+          item.product_id === product.id
             ? { ...item, quantity: item.quantity + 1 }
             : item,
         ),
@@ -72,7 +83,8 @@ const CashierModule = () => {
       setCartItems([
         ...cartItems,
         {
-          id: product.id,
+          id: crypto.randomUUID(),
+          product_id: product.id,
           name: product.name,
           price: product.price,
           quantity: 1,
@@ -106,6 +118,13 @@ const CashierModule = () => {
       subtotal,
       tax,
       total,
+      cashierName: user?.name || "Kasir",
+      receiptNumber: `INV-${new Date().toISOString().slice(0, 10)}-${Math.floor(Math.random() * 1000)}`,
+      date: new Date().toLocaleDateString("id-ID"),
+      time: new Date().toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
     });
 
     setIsCheckoutOpen(true);
@@ -115,10 +134,41 @@ const CashierModule = () => {
     setIsCheckoutOpen(false);
   };
 
-  const handlePaymentSuccess = () => {
-    setIsCheckoutOpen(false);
-    setIsReceiptOpen(true);
-    // In a real app, we would save the transaction to the database here
+  const handlePaymentSuccess = async (paymentMethod: string) => {
+    try {
+      // Save transaction to database
+      const transaction = {
+        receipt_number: transactionData.receiptNumber,
+        date: new Date().toISOString(),
+        subtotal: transactionData.subtotal,
+        tax: transactionData.tax,
+        total: transactionData.total,
+        payment_method: paymentMethod,
+        cashier_name: user?.name || "Kasir",
+        status: "completed" as const,
+      };
+
+      // Prepare transaction items
+      const items = cartItems.map((item) => ({
+        product_id: item.product_id,
+        quantity: item.quantity,
+        price: item.price,
+      }));
+
+      // Save to database
+      await transactionsApi.create(transaction, items);
+
+      // Update UI
+      setIsCheckoutOpen(false);
+      setIsReceiptOpen(true);
+      setTransactionData({
+        ...transactionData,
+        paymentMethod,
+      });
+    } catch (error) {
+      console.error("Error saving transaction:", error);
+      alert("Terjadi kesalahan saat menyimpan transaksi. Silakan coba lagi.");
+    }
   };
 
   const handleReceiptClose = () => {
@@ -126,6 +176,14 @@ const CashierModule = () => {
     // Clear cart after successful transaction
     setCartItems([]);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full bg-gray-50">
@@ -146,6 +204,7 @@ const CashierModule = () => {
         onClose={handleCheckoutClose}
         orderItems={cartItems}
         totalAmount={transactionData.total}
+        onPaymentSuccess={handlePaymentSuccess}
       />
 
       <ReceiptModal

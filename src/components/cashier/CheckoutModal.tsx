@@ -37,6 +37,7 @@ interface CheckoutModalProps {
   onClose?: () => void;
   orderItems?: OrderItem[];
   totalAmount?: number;
+  onPaymentSuccess?: (paymentMethod: string) => void;
 }
 
 interface OrderItem {
@@ -75,7 +76,10 @@ const CheckoutModal = ({
   };
 
   const handleConfirmPayment = () => {
-    // Here would be the logic to process the payment
+    // Process the payment and notify parent component
+    if (onPaymentSuccess) {
+      onPaymentSuccess(paymentMethod);
+    }
     setStep(3);
   };
 
